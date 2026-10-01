@@ -1,0 +1,22 @@
+[Unit]
+Description=ChatGPT Plan Trigger Bridge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=eilbridge
+Group=eilbridge
+WorkingDirectory=/opt/chatgpt-plan-trigger-bridge
+EnvironmentFile=/etc/chatgpt-plan-trigger-bridge.env
+ExecStart=/usr/bin/node /opt/chatgpt-plan-trigger-bridge/src/server.mjs
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/eilbridge/.config/chatgpt-plan-trigger-bridge
+
+[Install]
+WantedBy=multi-user.target

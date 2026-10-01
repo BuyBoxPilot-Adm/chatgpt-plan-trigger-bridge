@@ -1,45 +1,39 @@
 # chatgpt-plan-trigger-bridge
 
-A minimal, generic, open-source bridge for connecting a durable orchestrator such as Trigger.dev to an eligible ChatGPT plan through OpenAI's official **Sign in with ChatGPT** flow.
+A minimal, generic, open-source helper for connecting a durable orchestrator such as Trigger.dev to an eligible ChatGPT plan through OpenAI's official **Sign in with ChatGPT** flow.
 
 ## Status
 
 **POC only. Not production-ready.**
 
-The first goal is to prove authentication durability, token refresh, restart persistence, structured output, quota behavior, and safe observability before any downstream production workflow depends on this bridge.
+The current primary role of this repository is to perform the first local OAuth authorization safely and export the resulting ChatGPT-plan credentials in a format that can be imported into Trigger.dev. The persistent bridge/VM implementation remains available only as a fallback if Trigger-only credential persistence or program eligibility proves unreliable.
 
-## POC architecture
+## Current primary POC architecture
 
-Phase A deliberately proves ChatGPT-plan inference with the fewest moving parts:
+Stage A deliberately proves ChatGPT-plan inference with the fewest moving parts:
 
 ```text
-Trigger.dev / any orchestrator
+local browser OAuth bootstrap
         |
-        | HTTPS + bridge shared secret
         v
-chatgpt-plan-trigger-bridge
+chatgpt-plan-trigger-bridge helper
         |
-        | OAuth access token authorized for ChatGPT plan usage
+        | creates trigger.env.import locally
         v
-OpenAI public Responses endpoint
+Trigger.dev secret environment variables
+        |
+        | OAuth access token
+        v
+OpenAI /v1/models
+        |
+        v
+OpenAI /v1/responses
 store=false + stream=true
-        |
-        v
-structured JSON response
 ```
 
-After Phase A passes, Phase B adds the officially supported **Codex app-server** mode using the same OAuth token lifecycle.
+No `OPENAI_API_KEY` or `CODEX_API_KEY` should be configured for this qualification.
 
-## Implemented endpoints
-
-- `GET /health`
-- `POST /v1/run`
-- `POST /v1/reauth`
-- `GET /v1/quota-status`
-
-`POST /v1/run` accepts a prompt plus a JSON Schema, calls an eligible model through the ChatGPT-plan OAuth token, validates the returned structured JSON again with AJV, and normalizes relevant auth/quota errors.
-
-The POC intentionally limits concurrency to one active inference.
+After direct inference passes, the next qualification is rotating OAuth refresh-token persistence from Trigger.dev itself, followed by endurance/cold-start testing. The VM bridge path is retained only as a fallback.
 
 ## Local first-time authorization
 
@@ -64,7 +58,87 @@ The helper:
 
 **Never commit, paste into chat, or send that credential file through an insecure channel.**
 
-## Persistent VM setup
+## Export credentials for Trigger.dev
+
+After `npm run auth:local` completes successfully, run:
+
+```bash
+npm run auth:trigger-env
+```
+
+This creates a local file named:
+
+```text
+trigger.env.import
+```
+
+The file contains the OAuth registration/credential values required by the Trigger-only POC, including:
+
+```text
+CHATGPT_SIWC_CLIENT_ID
+CHATGPT_SIWC_EXT_AGENT_HOST_ID
+CHATGPT_SIWC_ACCESS_TOKEN
+CHATGPT_SIWC_REFRESH_TOKEN
+CHATGPT_SIWC_ID_TOKEN
+CHATGPT_SIWC_SCOPES
+CHATGPT_SIWC_SAVED_AT
+CHATGPT_SIWC_EXPIRES_IN
+CHATGPT_SIWC_EXPIRES_AT
+CHATGPT_SIWC_EARLIEST_REFRESH_AT
+```
+
+`trigger.env.import`, `*.env.import`, credential JSON files and host JSON files are excluded by `.gitignore`.
+
+Treat `trigger.env.import` as a password. Do not paste it into chat. Paste the `KEY=VALUE` lines directly into the Trigger.dev **Production** environment-variable UI, mark token-bearing values as secrets, then delete the local export when finished.
+
+At minimum, these values are credential secrets and should be protected accordingly:
+
+```text
+CHATGPT_SIWC_ACCESS_TOKEN
+CHATGPT_SIWC_REFRESH_TOKEN
+CHATGPT_SIWC_ID_TOKEN
+```
+
+## Trigger-only qualification target
+
+The private `Economy-in-Layers` orchestrator contains a qualification task that should:
+
+1. read the ChatGPT-plan OAuth credentials from Trigger.dev Production environment variables;
+2. confirm the `chatgpt.tokens.use.direct` scope;
+3. call `GET /v1/models` to discover account-visible models dynamically;
+4. select a visible text-capable model;
+5. call `POST /v1/responses` with `store:false` and `stream:true`;
+6. return the qualification phrase without using an OpenAI API key.
+
+A successful Stage A proves direct Trigger.dev -> ChatGPT-plan inference. It does **not** yet prove durable refresh-token rotation.
+
+## Next POC gates
+
+1. Official Sign in with ChatGPT works with the eligible plan.
+2. Direct Trigger.dev inference succeeds without `OPENAI_API_KEY` or `CODEX_API_KEY`.
+3. OAuth refreshes are serialized so the same rotating refresh token cannot be used concurrently.
+4. Replacement access/refresh credentials are persisted together in Trigger.dev shared secret storage.
+5. Ten consecutive inference runs succeed.
+6. At least one real token refresh/rotation succeeds.
+7. A later cold run succeeds using the newly persisted credentials.
+8. Revoked credentials produce a clean reauthorization state.
+9. Plan-limit behavior is understood before production use.
+10. Logs, metadata and task outputs never expose access/refresh/ID tokens.
+
+## Fallback persistent bridge
+
+If Trigger-only token persistence or deployment eligibility proves unreliable, this repository also contains a lightweight persistent bridge implementation.
+
+Implemented fallback endpoints:
+
+- `GET /health`
+- `POST /v1/run`
+- `POST /v1/reauth`
+- `GET /v1/quota-status`
+
+The bridge can keep a stable host identity, rotate credentials atomically, limit inference concurrency and normalize relevant auth/quota failures.
+
+### Persistent VM setup
 
 On the VM, initialize its own stable host ID:
 
@@ -85,11 +159,7 @@ The imported credentials are written by default to:
 ~/.config/chatgpt-plan-trigger-bridge/credentials.json
 ```
 
-The bridge rotates access/refresh credentials atomically when refresh is required.
-
-## Run the bridge
-
-Set a long random secret in the runtime environment. Do not reuse an OpenAI credential.
+To run the fallback bridge, set a long random shared secret and start the service:
 
 ```bash
 export BRIDGE_SHARED_SECRET='replace-with-a-long-random-secret'
@@ -98,51 +168,24 @@ npm start
 
 Default listener: `0.0.0.0:8787`.
 
-For production/POC connectivity from Trigger.dev, place the bridge behind HTTPS (for example an existing reverse proxy on the VM) and never expose port 8787 directly to the public internet without TLS and access controls.
-
-A hardened systemd example is included at:
+For remote connectivity, place it behind HTTPS and never expose port 8787 directly to the public internet without TLS and access controls. A hardened systemd example is included at:
 
 ```text
 deploy/chatgpt-plan-trigger-bridge.service.example
 ```
 
-## Trigger.dev variables
-
-The private orchestrator should store, as secrets/environment variables:
-
-```text
-CHATGPT_PLAN_BRIDGE_URL=https://your-bridge-host.example
-CHATGPT_PLAN_BRIDGE_SHARED_SECRET=<same long random bridge secret>
-```
-
-Do **not** configure `OPENAI_API_KEY` or `CODEX_API_KEY` for this POC.
-
 ## Current security / reliability behavior
 
-- credentials excluded by `.gitignore`;
-- bearer secret checked with timing-safe comparison;
-- OAuth access/refresh tokens never intentionally logged;
-- credential updates use atomic file replacement;
-- one active inference at a time;
+- credential exports excluded by `.gitignore`;
+- local OAuth uses PKCE, state and nonce;
+- OAuth access/refresh tokens are never intentionally logged;
+- fallback bridge credential updates use atomic file replacement;
+- fallback bridge limits active inference concurrency;
 - bounded request timeout;
-- structured output validated twice: OpenAI schema constraint + local AJV validation;
-- explicit normalized errors for plan limit, auth failure, schema failure, timeout and unsupported capabilities;
+- structured output validation is available in bridge mode;
 - quota reset times are never guessed.
 
-## Initial POC gates
-
-1. Official Sign in with ChatGPT works with an eligible plan.
-2. Stable host identity survives process and VM restarts.
-3. Access-token refresh works without routine manual intervention.
-4. Trigger/orchestrator -> bridge -> eligible Responses request -> valid structured JSON works.
-5. Revoked credentials produce a clean `AUTH_REQUIRED` state.
-6. Plan limits produce a clean `PLAN_LIMIT` state.
-7. Logs never expose access/refresh tokens.
-8. Ten consecutive end-to-end runs pass, including restart and refresh scenarios.
-9. Representative workload is benchmarked against plan quota before production use.
-10. Only after these gates pass is Codex app-server mode added and qualified.
-
-## Expected normalized errors
+## Expected normalized bridge errors
 
 - `AUTH_REQUIRED`
 - `PLAN_INELIGIBLE`
@@ -167,7 +210,7 @@ This repository must **not** contain:
 - scripts or media assets;
 - FFmpeg/Remotion pipelines;
 - Google Drive or YouTube publishing logic;
-- API keys, OAuth tokens, refresh tokens, or credential profiles.
+- API keys, OAuth tokens, refresh tokens, ID tokens or credential profiles.
 
 ## Official references
 

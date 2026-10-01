@@ -9,9 +9,10 @@
   "scripts": {
     "start": "node src/server.mjs",
     "auth:local": "node src/auth-local.mjs",
+    "auth:trigger-env": "node src/export-trigger-env.mjs",
     "auth:import": "node src/import-credentials.mjs",
     "host:init": "node src/init-host.mjs",
-    "check": "node --check src/server.mjs && node --check src/auth-local.mjs && node --check src/import-credentials.mjs && node --check src/init-host.mjs"
+    "check": "node --check src/server.mjs && node --check src/auth-local.mjs && node --check src/export-trigger-env.mjs && node --check src/import-credentials.mjs && node --check src/init-host.mjs"
   },
   "dependencies": {
     "ajv": "^8.17.1",

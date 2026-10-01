@@ -12,7 +12,7 @@ const TOKEN_ENDPOINT = `${ISSUER}/api/accounts/oauth/token`;
 const JWKS = createRemoteJWKSet(new URL(`${ISSUER}/.well-known/jwks.json`));
 const RESOURCE = "https://api.openai.com/v1";
 const SCOPES = "openid profile email offline_access resource.invoke chatgpt.tokens.use.direct";
-const AGENT_NAME = process.env.BRIDGE_AGENT_NAME ?? "ChatGPT Plan Trigger Bridge";
+const AGENT_NAME = process.env.BRIDGE_AGENT_NAME ?? "The Economy in Layers";
 
 const configDir = process.env.BRIDGE_CONFIG_DIR ?? path.join(os.homedir(), ".config", "chatgpt-plan-trigger-bridge");
 const localHostFile = process.env.BRIDGE_LOCAL_HOST_FILE ?? path.join(configDir, "local-auth-host.json");
@@ -40,16 +40,27 @@ async function loadOrCreateLocalHostId() {
 }
 
 function openBrowser(url) {
+  let child;
   try {
     if (process.platform === "win32") {
-      spawn("cmd", ["/c", "start", "", url], { detached: true, stdio: "ignore" }).unref();
+      // Avoid `cmd /c start`: OAuth URLs contain `&`, which cmd.exe can interpret
+      // as command separators and truncate the authorization request.
+      child = spawn("rundll32", ["url.dll,FileProtocolHandler", url], {
+        detached: true,
+        stdio: "ignore",
+        shell: false,
+      });
     } else if (process.platform === "darwin") {
-      spawn("open", [url], { detached: true, stdio: "ignore" }).unref();
+      child = spawn("open", [url], { detached: true, stdio: "ignore", shell: false });
     } else {
-      spawn("xdg-open", [url], { detached: true, stdio: "ignore" }).unref();
+      child = spawn("xdg-open", [url], { detached: true, stdio: "ignore", shell: false });
     }
+    child.on("error", () => {
+      // The complete URL is printed below, so browser auto-open is only a convenience.
+    });
+    child.unref();
   } catch {
-    // The URL is printed below, so browser auto-open is only a convenience.
+    // The complete URL is printed below, so browser auto-open is only a convenience.
   }
 }
 
@@ -107,7 +118,8 @@ const callbackResult = new Promise((resolve, reject) => {
     authorizeUrl.searchParams.set("code_challenge_method", "S256");
     authorizeUrl.searchParams.set("code_challenge", codeChallenge);
 
-    console.log("\nOpen this URL to continue with ChatGPT:\n");
+    console.log(`\nStarting ChatGPT authorization for: ${AGENT_NAME}`);
+    console.log("\nOpen this URL to continue with ChatGPT if the browser does not open automatically:\n");
     console.log(authorizeUrl.toString());
     console.log("\nWaiting for the local callback...\n");
     openBrowser(authorizeUrl.toString());
